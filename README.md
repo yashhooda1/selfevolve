@@ -90,8 +90,13 @@ selfevolve doctor                    # works before you pull anything
 # if your shell can't find `selfevolve`, its scripts dir isn't on PATH —
 # `python -m selfevolve.cli doctor` is identical and always works
 
-ollama pull qwen3:8b                 # generation
+ollama pull qwen2.5:7b-instruct      # generation
 ollama pull nomic-embed-text         # embeddings — one download, then offline forever
+
+# An instruct model, not a reasoning one: under a JSON-schema constraint a
+# reasoning model's thinking phase has nowhere to go. qwen3:8b timed out at 180s
+# on a review that qwen2.5:7b-instruct finished in 22s. If you prefer a reasoning
+# model anyway, set SELFEVOLVE_LLM_THINK=false.
 
 selfevolve review examples/sample_code/pipeline.py --project etl
 streamlit run app/streamlit_app.py

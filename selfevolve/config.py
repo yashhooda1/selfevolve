@@ -44,7 +44,13 @@ class Config:
 
     # --- generation: local Ollama ---
     llm_backend: str = _env("SELFEVOLVE_LLM_BACKEND", "ollama")  # ollama|fake
-    llm_model: str = _env("SELFEVOLVE_LLM_MODEL", "qwen3:8b")
+    # Instruct-tuned, not reasoning-tuned, and that is deliberate. Under a
+    # JSON-schema constraint a reasoning model's thinking phase has nowhere to go:
+    # qwen3:8b timed out at 180s on a real review where qwen2.5:7b-instruct
+    # finished the same file in 22-53s. Reasoning quality is not the bottleneck
+    # here -- the model supplies general code knowledge and the learned rules
+    # supply the judgement.
+    llm_model: str = _env("SELFEVOLVE_LLM_MODEL", "qwen2.5:7b-instruct")
     ollama_host: str = _env("OLLAMA_HOST", "http://127.0.0.1:11434")
     llm_timeout: int = _env_int("SELFEVOLVE_LLM_TIMEOUT", 180)
     warm_timeout: int = _env_int("SELFEVOLVE_WARM_TIMEOUT", 120)

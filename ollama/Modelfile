@@ -11,7 +11,7 @@
 # what makes the agent work, and switching it out does not change the agent's
 # behaviour. The learning loop lives in the application, not in the weights.
 
-FROM qwen3:8b
+FROM qwen2.5:7b-instruct
 
 # Low temperature: review comments should be reproducible, not creative.
 PARAMETER temperature 0.2
