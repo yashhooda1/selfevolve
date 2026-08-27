@@ -117,7 +117,7 @@ class SelfEvolvingAgent:
                     )
                 )
                 continue
-            ins = self.task.to_insight(out, fb, ti)
+            ins = self.task.to_insight(out, fb, ti, item)
             if ins.rule:
                 learned.append(ins)
         return learned

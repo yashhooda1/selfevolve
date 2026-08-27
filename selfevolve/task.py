@@ -67,7 +67,9 @@ class Task(Protocol):
 
     def reflect_schema(self) -> type[BaseModel]: ...
 
-    def to_insight(self, output: BaseModel, feedback: Feedback, task_input: TaskInput) -> Insight: ...
+    def to_insight(
+        self, output: BaseModel, feedback: Feedback, task_input: TaskInput, item: Item | None = None
+    ) -> Insight: ...
 
 
 class BaseTask:
@@ -87,7 +89,9 @@ class BaseTask:
     def retrieval_text(self, task_input: TaskInput) -> str:
         return task_input.text[:4000]
 
-    def to_insight(self, output: BaseModel, feedback: Feedback, task_input: TaskInput) -> Insight:
+    def to_insight(
+        self, output: BaseModel, feedback: Feedback, task_input: TaskInput, item: Item | None = None
+    ) -> Insight:
         hint = (getattr(output, "scope_hint", "any") or "any").strip().lower()
         scope = task_input.scope.model_copy(deep=True)
         if hint in ("any", "global", "all"):

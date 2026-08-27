@@ -11,7 +11,16 @@ from __future__ import annotations
 
 import pytest
 
-from selfevolve import Config, ExperienceStore, Feedback, Insight, Scope, SelfEvolvingAgent
+from selfevolve import (
+    Config,
+    ExperienceStore,
+    Feedback,
+    Insight,
+    Item,
+    RuleOut,
+    Scope,
+    SelfEvolvingAgent,
+)
 from selfevolve.llm import FakeProvider
 from selfevolve.tasks.code_review import CodeReviewTask, input_from_text
 
@@ -199,3 +208,54 @@ def test_thorough_mode_changes_the_ask(cfg):
     for task in (default, thorough):
         assert "override your defaults" in task.system_prompt()
         assert "do not produce that comment" in task.act_prompt(ti, [], [])
+
+
+def test_rejection_never_becomes_advice_arguing_for_the_comment(cfg):
+    """The single worst failure mode this loop has, caught on a real review.
+
+    A comment titled "Hardcoded path" was rejected with no note. Reflection wrote
+    'Avoid hardcoding file paths... use configuration files' -- best-practice
+    advice. Stored under an "avoid" marker, that rule reads as ARGUING FOR the
+    very comment the engineer discarded, so the next review flags it harder.
+    Learning nothing would have been better.
+    """
+    task = CodeReviewTask()
+    ti = input_from_text(CODE, project="control")
+    item = Item(title="Hardcoded path", body="The path is hardcoded.", tags=["flexibility"])
+    drifted = RuleOut(
+        rule=(
+            "Avoid hardcoding file paths or resource locations in the code. Use "
+            "configuration files or environment variables to specify paths."
+        ),
+        rationale="",
+        scope_hint="control",
+    )
+
+    ins = task.to_insight(drifted, Feedback(item_id=item.id, action="reject"), ti, item)
+
+    assert ins.rule.lower().startswith("do not flag"), ins.rule
+    assert "Hardcoded path" in ins.rule
+    assert "drifted into advice" in ins.rationale, "should say why it was rewritten"
+    # a rejection with no stated reason is a guess at scope -- start it low
+    assert ins.confidence <= 0.35
+
+    rendered = task.render_lessons([ins], [])
+    assert "[avoid" in rendered
+    assert "Use configuration files" not in rendered, "advice must not reach the prompt"
+
+
+def test_a_properly_phrased_suppression_is_left_alone(cfg):
+    """The guard must not mangle a rule the model got right."""
+    task = CodeReviewTask()
+    ti = input_from_text(CODE, project="control")
+    item = Item(title="Hardcoded path", body="...")
+    good = RuleOut(
+        rule="Do not flag hardcoded paths in entry-point scripts; they are set deliberately.",
+        rationale="team convention",
+        scope_hint="control",
+    )
+    fb = Feedback(item_id=item.id, action="reject", note="entry points set them on purpose")
+    ins = task.to_insight(good, fb, ti, item)
+
+    assert ins.rule == good.rule, "a correct suppression rule should survive untouched"
+    assert ins.confidence > 0.35, "a rejection WITH a reason is stronger evidence"

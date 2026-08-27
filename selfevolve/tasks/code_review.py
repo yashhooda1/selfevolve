@@ -108,6 +108,41 @@ do not produce that comment.
             )
         return "Return an empty item list if you find nothing worth an engineer's time."
 
+    # Phrases that make a rule read as suppression rather than as advice.
+    _SUPPRESSES = (
+        "do not flag", "don't flag", "avoid flagging", "never flag", "stop flagging",
+        "do not raise", "don't raise", "do not comment on", "don't comment on",
+        "do not report", "refrain from flagging", "no longer flag",
+    )
+
+    def to_insight(self, output, feedback: Feedback, task_input: TaskInput, item: Item | None = None):
+        insight = super().to_insight(output, feedback, task_input, item)
+        if feedback.action != "reject" or not insight.rule:
+            return insight
+
+        if not any(m in insight.rule.lower() for m in self._SUPPRESSES):
+            # The model restated the concern as best-practice advice instead of
+            # encoding the rejection. Stored as-is, that rule is injected under an
+            # "avoid" marker while its text argues FOR the comment the engineer
+            # discarded -- actively worse than learning nothing. Observed on the
+            # first real review, so this correction is deterministic, not a prompt
+            # hope: a 7B model will not reliably obey an instruction it has just
+            # disobeyed.
+            concern = (item.title if item else "this class of comment").rstrip(".")
+            # Deliberately do NOT keep the drifted text, not even as a note:
+            # render_lessons injects the rationale too, so an audit trail here
+            # would smuggle the advice straight back into the next prompt. A test
+            # caught exactly that.
+            insight.rationale = "engineer rejected it; reflection drifted into advice and was rewritten"
+            insight.rule = f'Do not flag "{concern}" in {task_input.scope.project} code.'
+
+        if not feedback.note:
+            # A rejection without a reason says the comment was unwanted but not
+            # why, so the rule is a guess at scope. Start it low: if it is right it
+            # gets reinforced, and if it is over-broad it decays out on its own.
+            insight.confidence = min(insight.confidence, 0.35)
+        return insight
+
     def reflect_prompt(self, task_input: TaskInput, item: Item, feedback: Feedback) -> str:
         header = {
             "accept": "The engineer ACCEPTED this comment and added a note.",
@@ -116,7 +151,15 @@ do not produce that comment.
         }[feedback.action]
         guidance = {
             "accept": "Write a rule that reinforces finding this class of issue, and captures what made this comment useful.",
-            "reject": "Write a rule that prevents this class of comment in this situation. Be precise about *when* it should not be raised — an over-broad rule will suppress real findings later.",
+            "reject": (
+                "Write a SUPPRESSION rule. It must instruct a future reviewer NOT to "
+                "raise this class of comment, and must begin with 'Do not flag'. "
+                "Example: 'Do not flag hardcoded paths in entry-point scripts; this "
+                "project sets them deliberately.' "
+                "Do NOT restate the concern as coding advice — that would argue FOR "
+                "the very comment the engineer just threw out. Be precise about *when* "
+                "it should not be raised; an over-broad rule suppresses real findings later."
+            ),
             "edit": "Preserve the concern that was correct and encode the correction. The rule should describe how to phrase or scope this kind of comment properly.",
         }[feedback.action]
 
