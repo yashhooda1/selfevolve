@@ -1,7 +1,7 @@
 # selfevolve
 
-[![airgap](https://github.com/hoodarunner/selfevolve/actions/workflows/airgap.yml/badge.svg)](https://github.com/hoodarunner/selfevolve/actions/workflows/airgap.yml)
-[![tests](https://github.com/hoodarunner/selfevolve/actions/workflows/ci.yml/badge.svg)](https://github.com/hoodarunner/selfevolve/actions/workflows/ci.yml)
+[![airgap](https://github.com/yashhooda1/selfevolve/actions/workflows/airgap.yml/badge.svg)](https://github.com/yashhooda1/selfevolve/actions/workflows/airgap.yml)
+[![tests](https://github.com/yashhooda1/selfevolve/actions/workflows/ci.yml/badge.svg)](https://github.com/yashhooda1/selfevolve/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.10--3.14-blue)](pyproject.toml)
 [![dependencies](https://img.shields.io/badge/runtime%20deps-pydantic-brightgreen)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
