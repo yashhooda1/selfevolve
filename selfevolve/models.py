@@ -44,7 +44,7 @@ class Scope(BaseModel):
         }
 
     @classmethod
-    def from_metadata(cls, md: dict[str, Any]) -> "Scope":
+    def from_metadata(cls, md: dict[str, Any]) -> Scope:
         return cls(
             project=md.get("scope_project", "default"),
             language=md.get("scope_language", "any"),
@@ -128,7 +128,7 @@ class Insight(BaseModel):
         return md
 
     @classmethod
-    def from_record(cls, rec_id: str, md: dict[str, Any]) -> "Insight":
+    def from_record(cls, rec_id: str, md: dict[str, Any]) -> Insight:
         return cls(
             id=rec_id,
             rule=md.get("rule", ""),

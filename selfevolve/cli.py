@@ -24,6 +24,7 @@ from .offline import airgap, report
 from .store import ExperienceStore
 from .tasks.code_review import CodeReviewTask, input_from_file, input_from_text
 
+
 def _supports_ansi() -> bool:
     """Decide whether to emit colour, and on Windows, turn it on.
 
@@ -55,6 +56,26 @@ def _supports_ansi() -> bool:
         except Exception:
             return False
     return True
+
+
+def _glyph(preferred: str, fallback: str) -> str:
+    """Return `preferred` only if this stdout can actually encode it.
+
+    On Windows, a piped or redirected stdout uses the legacy code page (cp1252
+    here), which has no U+2713. Printing one raises UnicodeEncodeError — and
+    because the except-handler also printed a glyph, `doctor` crashed while
+    reporting the crash, burying the real message. A diagnostic that dies on its
+    own output is worse than no diagnostic.
+    """
+    enc = getattr(sys.stdout, "encoding", None) or "ascii"
+    try:
+        preferred.encode(enc)
+    except (UnicodeEncodeError, LookupError):
+        return fallback
+    return preferred
+
+
+OK, NO, WARN = _glyph("\u2713", "[ok]"), _glyph("\u2717", "[FAIL]"), _glyph("\u26a0", "!")
 
 
 if _supports_ansi():
@@ -229,7 +250,7 @@ def cmd_doctor(args, cfg: Config) -> int:
 
     sync_warning = cfg.sync_folder_warning()
     if sync_warning:
-        print(f"\n  {YEL}⚠ cloud-sync folder{RST}")
+        print(f"\n  {YEL}{WARN} cloud-sync folder{RST}")
         for line in sync_warning.splitlines():
             print(f"    {line}")
 
@@ -262,7 +283,7 @@ def cmd_doctor(args, cfg: Config) -> int:
             ti = input_from_text("def f(a, b):\n    return a / b\n", summary="doctor-probe")
             thread = f"doctor-{uuid.uuid4().hex[:8]}"
             pending = agent.start(ti, thread)
-            print(f"  {GRN}✓{RST} retrieve + act        {len(pending['items'])} item(s)")
+            print(f"  {GRN}{OK}{RST} retrieve + act        {len(pending['items'])} item(s)")
             result = agent.submit_feedback(
                 [
                     Feedback(
@@ -273,12 +294,12 @@ def cmd_doctor(args, cfg: Config) -> int:
                 ],
                 thread,
             )
-            print(f"  {GRN}✓{RST} interrupt + resume    trajectory {result['trajectory_id']}")
-            print(f"  {GRN}✓{RST} reflect + persist     {len(result['learned'])} rule(s)")
+            print(f"  {GRN}{OK}{RST} interrupt + resume    trajectory {result['trajectory_id']}")
+            print(f"  {GRN}{OK}{RST} reflect + persist     {len(result['learned'])} rule(s)")
 
             store = ExperienceStore(probe_cfg)
             hits = store.retrieve_insights("division by zero", scope=ti.scope)
-            print(f"  {GRN}✓{RST} retrieval             {len(hits)} rule(s) matched")
+            print(f"  {GRN}{OK}{RST} retrieval             {len(hits)} rule(s) matched")
 
             # clean up after ourselves — a doctor run should leave no rules behind
             for ins in result["learned"]:
@@ -288,7 +309,7 @@ def cmd_doctor(args, cfg: Config) -> int:
             store.close()
             agent.close()
     except Exception as exc:  # noqa: BLE001
-        print(f"\n  {RED}✗ FAILED{RST}  {type(exc).__name__}: {exc}")
+        print(f"\n  {RED}{NO} FAILED{RST}  {type(exc).__name__}: {exc}")
         print(f"\n{RED}Something tried to leave this machine, or the loop broke.{RST}")
         return 1
 
@@ -318,10 +339,18 @@ def cmd_export(args, cfg: Config) -> int:
 
 
 def cmd_reset(args, cfg: Config) -> int:
-    if input("Wipe all learned experience? [y/N] ").strip().lower() != "y":
-        return 1
-    ExperienceStore(cfg).reset()
-    print("experience store cleared")
+    if not args.yes:
+        # Interactive prompts are hostile to scripts and to Windows shells where
+        # piping stdin is fiddly. --yes exists so a rerun script can wipe state
+        # without a human at the keyboard.
+        if input("Wipe all learned experience? [y/N] ").strip().lower() != "y":
+            print("cancelled")
+            return 1
+    store = ExperienceStore(cfg)
+    before = len(store.all_insights(include_retired=True))
+    store.reset()
+    store.close()
+    print(f"experience store cleared ({before} rule(s) removed)")
     return 0
 
 
@@ -356,6 +385,7 @@ def main(argv: list[str] | None = None) -> int:
     e.set_defaults(fn=cmd_export)
 
     s = sub.add_parser("reset")
+    s.add_argument("--yes", "-y", action="store_true", help="skip the confirmation prompt")
     s.set_defaults(fn=cmd_reset)
 
     args = p.parse_args(argv)

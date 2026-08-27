@@ -34,7 +34,7 @@ import json
 import time
 from typing import Any
 
-from .config import Config, DEFAULT
+from .config import DEFAULT, Config
 from .llm import LLMProvider, get_provider
 from .models import Feedback, Insight, Item, Scope, Trajectory
 from .store import ExperienceStore

@@ -22,8 +22,8 @@ dependencies = [
 
 [project.optional-dependencies]
 ui = ["streamlit>=1.36"]
-dev = ["pytest>=8.0", "ruff>=0.5"]
-all = ["streamlit>=1.36", "pytest>=8.0", "ruff>=0.5"]
+dev = ["pytest>=8.0", "ruff>=0.15,<0.17"]
+all = ["streamlit>=1.36", "pytest>=8.0", "ruff>=0.15,<0.17"]
 
 [project.scripts]
 selfevolve = "selfevolve.cli:main"
@@ -38,3 +38,7 @@ addopts = "-q"
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]

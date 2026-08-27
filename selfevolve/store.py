@@ -26,9 +26,9 @@ import math
 import sqlite3
 import time
 from array import array
-from typing import Iterable
+from collections.abc import Iterable
 
-from .config import Config, DEFAULT
+from .config import DEFAULT, Config
 from .embeddings import Embedder, get_embedder
 from .models import Feedback, Insight, Item, Metrics, Scope, Trajectory
 
@@ -103,7 +103,7 @@ def _cosine(a: list[float], b: list[float]) -> float:
     if not a or not b or len(a) != len(b):
         return 0.0
     dot = na = nb = 0.0
-    for x, y in zip(a, b):
+    for x, y in zip(a, b, strict=True):
         dot += x * y
         na += x * x
         nb += y * y

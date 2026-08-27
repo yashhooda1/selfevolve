@@ -13,6 +13,7 @@ import re
 import socket
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,24 @@ from selfevolve.tasks.code_review import CodeReviewTask, input_from_text
 
 CODE = "def ratio(a, b):\n    return a / b\n"
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _env(**overrides):
+    """Inherit the real environment, then override.
+
+    Passing a hand-built dict to subprocess REPLACES the environment entirely.
+    On Windows that drops APPDATA, and Python locates per-user site-packages
+    through APPDATA — so the child process could not find pydantic and died with
+    ModuleNotFoundError. The test was broken, not the code. Inherit, then override.
+    """
+    import os
+
+    env = dict(os.environ)
+    env.setdefault("SELFEVOLVE_EMBED_BACKEND", "hash")
+    env.setdefault("SELFEVOLVE_LLM_BACKEND", "fake")
+    env.update(overrides)
+    return env
+
 
 
 @pytest.fixture
@@ -147,7 +166,7 @@ def test_embedder_falls_back_when_ollama_dies_midway(cfg):
 def test_env_is_hardened_on_import():
     import os
 
-    for key, expected in _ENV_LOCKDOWN.items():
+    for key in _ENV_LOCKDOWN:
         assert os.environ.get(key) is not None, f"{key} was not set"
     for key in _STRIP_IF_PRESENT:
         assert not os.environ.get(key), f"{key} should have been stripped"
@@ -182,28 +201,63 @@ def test_no_remote_urls_in_source():
     assert not offenders, "remote URLs in executable code:\n" + "\n".join(offenders)
 
 
-def test_no_network_libraries_imported():
-    """requests / httpx / huggingface_hub must not be in the import graph."""
-    banned = {"requests", "httpx", "aiohttp", "huggingface_hub", "sentence_transformers", "chromadb"}
-    code = (
-        "import selfevolve, selfevolve.store, selfevolve.graph, selfevolve.cli, "
-        "selfevolve.tasks.code_review, sys; "
-        f"print(','.join(sorted({banned!r} & set(sys.modules))))"
-    )
-    out = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, cwd=ROOT, check=True
-    )
-    assert out.stdout.strip() == "", f"network libraries imported: {out.stdout.strip()}"
+BANNED = {
+    "requests", "httpx", "aiohttp", "urllib3", "huggingface_hub",
+    "sentence_transformers", "chromadb", "langchain", "langsmith", "langgraph",
+    "openai", "anthropic", "posthog", "onnxruntime",
+}
+
+
+def test_our_source_imports_nothing_that_talks_to_the_network():
+    """Parse every module we ship and check its import statements.
+
+    This replaced a check on sys.modules after importing selfevolve. That version
+    was unreliable in a shared environment: on a machine with a hundred packages
+    in user site-packages, something else can drag `requests` in through a .pth
+    file or a plugin entry point, and the test then fails for a dependency that
+    is not ours. A test that cries wolf is a test people learn to ignore.
+
+    An AST scan asks the question we actually mean -- does OUR code import this --
+    and the answer does not depend on what else is installed.
+    """
+    import ast
+
+    offenders = []
+    for path in (ROOT / "selfevolve").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                names = [node.module]
+            for name in names:
+                if name.split(".")[0] in BANNED:
+                    offenders.append(f"{path.name}:{node.lineno}: import {name}")
+    assert not offenders, "network libraries imported by our code:\n" + "\n".join(offenders)
+
+
+def test_declared_dependencies_pull_nothing_banned():
+    """The installed tree matters as much as our own imports: a dependency that
+    drags in an HTTP client puts one on the machine whether we call it or not.
+
+    Checks selfevolve's own declared requirements. The airgap workflow proves the
+    stronger version -- a fresh venv install containing none of these -- because
+    only a clean environment can answer the transitive question honestly.
+    """
+    from importlib.metadata import requires
+
+    declared = requires("selfevolve") or []
+    runtime = [
+        r.split(";")[0].strip() for r in declared
+        if "extra ==" not in r  # optional extras (streamlit, pytest) are not runtime
+    ]
+    offenders = [r for r in runtime if r.split()[0].split("[")[0].lower() in BANNED]
+    assert not offenders, f"declared runtime dependencies include: {offenders}"
 
 
 def test_doctor_exits_zero(tmp_path):
-    env = {
-        "SELFEVOLVE_DATA_DIR": str(tmp_path / "doc"),
-        "SELFEVOLVE_EMBED_BACKEND": "hash",
-        "SELFEVOLVE_LLM_BACKEND": "fake",
-        "PATH": "/usr/bin:/bin:/usr/local/bin",
-        "HOME": str(tmp_path),
-    }
+    env = _env(SELFEVOLVE_DATA_DIR=str(tmp_path / "doc"))
     out = subprocess.run(
         [sys.executable, "-m", "selfevolve.cli", "doctor"],
         capture_output=True, text=True, cwd=ROOT, env=env,
@@ -215,13 +269,7 @@ def test_doctor_exits_zero(tmp_path):
 def test_doctor_leaves_no_rules_behind(tmp_path):
     """A diagnostic that pollutes your learned rules is a bad diagnostic."""
     data_dir = tmp_path / "doc2"
-    env = {
-        "SELFEVOLVE_DATA_DIR": str(data_dir),
-        "SELFEVOLVE_EMBED_BACKEND": "hash",
-        "SELFEVOLVE_LLM_BACKEND": "fake",
-        "PATH": "/usr/bin:/bin:/usr/local/bin",
-        "HOME": str(tmp_path),
-    }
+    env = _env(SELFEVOLVE_DATA_DIR=str(data_dir))
     subprocess.run(
         [sys.executable, "-m", "selfevolve.cli", "doctor"],
         capture_output=True, text=True, cwd=ROOT, env=env, check=True,
@@ -277,11 +325,7 @@ def test_cloud_sync_folder_is_detected(tmp_path):
 def test_output_has_no_escape_codes_when_piped():
     """Piping a command must produce a clean file, not escape-code soup —
     the default on a Windows console that hasn't enabled VT."""
-    env = {
-        "SELFEVOLVE_DATA_DIR": "/tmp/se-pipe", "SELFEVOLVE_EMBED_BACKEND": "hash",
-        "SELFEVOLVE_LLM_BACKEND": "fake", "PATH": "/usr/bin:/bin:/usr/local/bin",
-        "HOME": "/tmp",
-    }
+    env = _env(SELFEVOLVE_DATA_DIR=str(Path(tempfile.mkdtemp()) / "pipe"))
     out = subprocess.run(
         [sys.executable, "-m", "selfevolve.cli", "metrics"],
         capture_output=True, text=True, cwd=ROOT, env=env, check=True,
@@ -298,3 +342,27 @@ def test_published_modelfile_matches_the_task():
         capture_output=True, text=True, cwd=ROOT,
     )
     assert out.returncode == 0, out.stdout + out.stderr
+
+
+def test_doctor_survives_a_legacy_console_encoding():
+    """Windows pipes stdout as cp1252, which cannot encode U+2713.
+
+    `doctor` printed a check mark, raised UnicodeEncodeError, and then crashed
+    again inside its own error handler -- which also printed a glyph -- so the
+    real failure was never shown. Found on a real Windows 11 machine; this pins
+    it shut.
+    """
+    env = _env(
+        SELFEVOLVE_DATA_DIR=str(Path(tempfile.mkdtemp()) / "cp1252"),
+        PYTHONIOENCODING="cp1252",
+    )
+    # Decode as cp1252 too: the child is writing cp1252 bytes, so decoding them
+    # as UTF-8 would fail in the test harness rather than in the code under test.
+    out = subprocess.run(
+        [sys.executable, "-m", "selfevolve.cli", "doctor"],
+        capture_output=True, cwd=ROOT, env=env,
+        encoding="cp1252", errors="replace",
+    )
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "UnicodeEncodeError" not in out.stderr
+    assert "Full loop completed with the network cut" in out.stdout

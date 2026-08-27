@@ -31,7 +31,7 @@ import re
 import urllib.error
 import urllib.request
 
-from .config import Config, DEFAULT
+from .config import DEFAULT, Config
 
 _TOKEN = re.compile(r"[a-z0-9_]+")
 _HASH_DIM = 384
@@ -131,7 +131,7 @@ def _hash_embed(text: str) -> tuple[float, ...]:
     if not tokens:
         return tuple(vec)
     # unigrams + bigrams, so short rules and code snippets still separate
-    grams = tokens + [f"{a}_{b}" for a, b in zip(tokens, tokens[1:])]
+    grams = tokens + [f"{a}_{b}" for a, b in zip(tokens, tokens[1:], strict=False)]
     for g in grams:
         h = int(hashlib.md5(g.encode()).hexdigest(), 16)
         vec[h % _HASH_DIM] += 1.0 if (h >> 8) % 2 else -1.0

@@ -14,7 +14,7 @@ from .offline import harden_env
 
 harden_env()  # before anything else imports a library that reads these vars
 
-from .config import Config, DEFAULT  # noqa: E402
+from .config import DEFAULT, Config  # noqa: E402
 from .graph import SelfEvolvingAgent  # noqa: E402
 from .models import Feedback, Insight, Item, Metrics, Scope, Trajectory  # noqa: E402
 from .offline import NetworkBlocked, airgap  # noqa: E402

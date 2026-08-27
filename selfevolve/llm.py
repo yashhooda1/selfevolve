@@ -23,7 +23,7 @@ from typing import Any, Protocol, TypeVar
 
 from pydantic import BaseModel
 
-from .config import Config, DEFAULT
+from .config import DEFAULT, Config
 
 T = TypeVar("T", bound=BaseModel)
 
