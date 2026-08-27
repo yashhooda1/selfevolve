@@ -22,7 +22,7 @@ from selfevolve import Config, ExperienceStore, Feedback, NetworkBlocked, SelfEv
 from selfevolve.embeddings import Embedder
 from selfevolve.llm import FakeProvider, OllamaProvider
 from selfevolve.offline import _ENV_LOCKDOWN, _STRIP_IF_PRESENT, report
-from selfevolve.tasks.code_review import CodeReviewTask, input_from_text
+from selfevolve.tasks.code_review import CodeReviewTask, input_from_file, input_from_text
 
 CODE = "def ratio(a, b):\n    return a / b\n"
 ROOT = Path(__file__).resolve().parents[1]
@@ -371,3 +371,62 @@ def test_doctor_survives_a_legacy_console_encoding():
     assert out.returncode == 0, out.stdout + out.stderr
     assert "UnicodeEncodeError" not in out.stderr
     assert "Full loop completed with the network cut" in out.stdout
+
+
+def test_timeout_is_reported_as_guidance_not_a_traceback(cfg):
+    """A slow local model must produce advice, not a stack trace.
+
+    socket.timeout is TimeoutError, which is NOT urllib.error.URLError, so the
+    original handler missed it entirely and a first real review ended in a raw
+    traceback from http.client. Found on a real machine running qwen3:8b.
+    """
+    from unittest.mock import patch
+
+    from selfevolve.llm import OllamaError, OllamaProvider
+    from selfevolve.task import ItemsOut
+
+    with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")):
+        with pytest.raises(OllamaError) as err:
+            OllamaProvider(cfg).structured("s", "p", ItemsOut)
+
+    msg = str(err.value)
+    assert "did not answer within" in msg
+    assert "qwen2.5:7b-instruct" in msg, "should suggest a concrete alternative"
+    assert "SELFEVOLVE_LLM_TIMEOUT" in msg, "should name the knob that raises the ceiling"
+
+
+def test_empty_model_response_is_explained(cfg):
+    """Reasoning models sometimes return nothing under a schema constraint.
+    Pydantic's 'Invalid JSON' is not a useful thing to show for that."""
+    import io
+    from unittest.mock import patch
+
+    from selfevolve.llm import OllamaError, OllamaProvider
+    from selfevolve.task import ItemsOut
+
+    class _Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    body = b'{"message": {"content": "   "}}'
+    with patch("urllib.request.urlopen", return_value=_Resp(body)):
+        with pytest.raises(OllamaError, match="empty response"):
+            OllamaProvider(cfg).structured("s", "p", ItemsOut)
+
+
+def test_oversized_file_is_capped_and_reported(tmp_path):
+    """A 2,000-line module should be trimmed, and the caller told it was."""
+    big = tmp_path / "big.py"
+    big.write_text("\n".join(f"x{i} = {i}" for i in range(4000)), encoding="utf-8")
+
+    ti = input_from_file(big, project="p", max_chars=5000)
+    assert len(ti.text) <= 5000
+    assert ti.meta["truncated_chars"] > 0
+    assert ti.meta["total_lines"] == 4000
+    assert not ti.text.endswith("|"), "should cut on a line boundary"
+
+    untouched = input_from_file(big, project="p", max_chars=None)
+    assert untouched.meta["truncated_chars"] == 0

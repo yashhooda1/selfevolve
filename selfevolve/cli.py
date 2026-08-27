@@ -14,11 +14,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 import uuid
 
 from .config import Config
 from .graph import SelfEvolvingAgent
-from .llm import FakeProvider, OllamaProvider, get_provider
+from .llm import FakeProvider, OllamaError, OllamaProvider, get_provider
 from .models import Feedback, Scope
 from .offline import airgap, report
 from .store import ExperienceStore
@@ -99,11 +100,34 @@ def _agent(cfg: Config) -> SelfEvolvingAgent:
 
 def cmd_review(args, cfg: Config) -> int:
     agent = _agent(cfg)
-    ti = input_from_file(args.file, project=args.project, team=args.team)
+    ti = input_from_file(
+        args.file, project=args.project, team=args.team, max_chars=cfg.max_input_chars
+    )
     thread_id = args.thread or f"review-{uuid.uuid4().hex[:8]}"
 
     print(f"\n{BOLD}Reviewing{RST} {ti.summary}  {DIM}[{ti.scope.key()}]  thread={thread_id}{RST}")
-    pending = agent.start(ti, thread_id)
+    cut = ti.meta.get("truncated_chars", 0)
+    if cut:
+        print(
+            f"{YEL}{WARN}{RST} file is {ti.meta['total_lines']} lines; reviewing the first "
+            f"{cfg.max_input_chars} characters only {DIM}(raise SELFEVOLVE_MAX_INPUT_CHARS){RST}"
+        )
+
+    # A local 8B model takes tens of seconds. Silence for that long reads as a
+    # hang, and the first thing anyone does with a hang is kill it.
+    if isinstance(agent.llm, OllamaProvider):
+        print(f"{DIM}Loading {cfg.llm_model}…{RST}", end="", flush=True)
+        agent.llm.warm()
+        print(f"\r{DIM}Reviewing with {cfg.llm_model} (up to {cfg.llm_timeout}s)…{RST}",
+              end="", flush=True)
+
+    started = time.time()
+    try:
+        pending = agent.start(ti, thread_id)
+    except OllamaError as exc:
+        print(f"\r{RED}{NO}{RST} {exc}")
+        return 1
+    print(f"\r{DIM}Reviewed in {time.time() - started:.0f}s{RST}" + " " * 30)
 
     used = pending["retrieved_insights"]
     if used:

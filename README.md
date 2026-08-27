@@ -97,6 +97,20 @@ selfevolve review examples/sample_code/pipeline.py --project etl
 streamlit run app/streamlit_app.py
 ```
 
+### Rerun everything
+
+One command: install, test, lint, prove offline, and run a demo that teaches it a lesson
+and shows the lesson applied to a different file.
+
+```bash
+verify.cmd            # Windows
+./verify.sh           # macOS / Linux
+verify.cmd --keep     # don't wipe rules you've already taught it
+```
+
+It uses `python -m selfevolve.cli` throughout, so it works whether or not Python's
+scripts directory is on your PATH.
+
 No model yet? `--backend fake` exercises the entire loop — retrieval, the pause,
 reflection, persistence — deterministically and with no service at all.
 
@@ -285,7 +299,15 @@ warns you if it detects one of those folders.
 Every setting is an environment variable — `SELFEVOLVE_LLM_BACKEND`,
 `SELFEVOLVE_LLM_MODEL`, `SELFEVOLVE_EMBED_BACKEND`, `SELFEVOLVE_EMBED_MODEL`,
 `SELFEVOLVE_DATA_DIR`, `SELFEVOLVE_TOP_K_INSIGHTS`, `SELFEVOLVE_MIN_CONFIDENCE`,
-`SELFEVOLVE_RETIRE_BELOW`, `OLLAMA_HOST`. See `config.py`. Every default points at
+`SELFEVOLVE_RETIRE_BELOW`, `OLLAMA_HOST`. See `config.py`.
+
+For a slow or stubborn local model: `SELFEVOLVE_LLM_TIMEOUT` (default 180s),
+`SELFEVOLVE_MAX_INPUT_CHARS` (default 12000 — how much of a file is sent),
+`SELFEVOLVE_NUM_CTX`, and `SELFEVOLVE_LLM_THINK=false`, which turns off a
+reasoning model's thinking phase. Under a JSON-schema constraint that thinking
+has nowhere to go, and qwen3-class models can grind for minutes; an
+instruct-tuned model such as `qwen2.5:7b-instruct` is usually both faster and
+steadier at structured output. Every default points at
 something on this machine, and `doctor` tells you if you've overridden one to something
 that isn't loopback.
 
@@ -296,7 +318,7 @@ Three different registries, three different artifacts. They are not interchangea
 **GitHub — the code.** This is where the project lives.
 
 ```bash
-gh repo create hoodarunner/selfevolve --public --source=. --remote=origin --push
+gh repo create yashhooda1/selfevolve --public --source=. --remote=origin --push
 ```
 
 **PyPI — the installable package.** So people can `pip install selfevolve` without cloning.

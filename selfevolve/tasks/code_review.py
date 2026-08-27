@@ -106,16 +106,28 @@ an engineer's time."""
         return "\n".join(parts)
 
 
-def input_from_file(path: str | Path, project: str = "default", team: str = "any") -> TaskInput:
+def input_from_file(
+    path: str | Path, project: str = "default", team: str = "any", max_chars: int | None = None
+) -> TaskInput:
     p = Path(path)
     text = p.read_text(encoding="utf-8", errors="replace")
     lang = _EXT_LANG.get(p.suffix.lower(), "any")
     framework = _guess_framework(text)
+
+    numbered = _with_line_numbers(text)
+    truncated = 0
+    if max_chars and len(numbered) > max_chars:
+        # Reviewing the first N characters well beats sending a 2,000-line module
+        # past the context window and waiting minutes for a worse answer. The
+        # caller is told, so a partial review is never mistaken for a full one.
+        truncated = len(numbered) - max_chars
+        numbered = numbered[:max_chars].rsplit("\n", 1)[0]
+
     return TaskInput(
-        text=_with_line_numbers(text),
+        text=numbered,
         summary=p.name,
         scope=Scope(project=project, language=lang, framework=framework, team=team),
-        meta={"path": str(p)},
+        meta={"path": str(p), "truncated_chars": truncated, "total_lines": text.count("\n") + 1},
     )
 
 

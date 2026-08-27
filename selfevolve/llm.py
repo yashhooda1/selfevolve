@@ -45,7 +45,28 @@ class OllamaProvider:
     def __init__(self, cfg: Config | None = None):
         self.cfg = cfg or DEFAULT
 
+    def warm(self) -> None:
+        """Load the model before the real request.
+
+        A cold model spends its first seconds mapping several GB into memory,
+        and that time is charged against the same timeout as the actual work --
+        so a first review can fail for a reason that has nothing to do with the
+        review. Warming separately makes the timeout mean what it says.
+        """
+        payload = {"model": self.cfg.llm_model, "messages": [], "stream": False}
+        req = urllib.request.Request(
+            f"{self.cfg.ollama_host}/api/chat",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.cfg.warm_timeout):
+                pass
+        except Exception:
+            pass  # best effort; the real call reports properly if it matters
+
     def structured(self, system: str, prompt: str, schema: type[T]) -> T:
+        options = {"temperature": 0.2, "num_ctx": self.cfg.num_ctx}
         payload = {
             "model": self.cfg.llm_model,
             "messages": [
@@ -56,8 +77,16 @@ class OllamaProvider:
             # Constrained decoding against the pydantic schema — the model can
             # only emit JSON matching it, so parsing is not a hope.
             "format": schema.model_json_schema(),
-            "options": {"temperature": 0.2, "num_ctx": 8192},
+            "options": options,
         }
+        # Reasoning models (qwen3, deepseek-r1) want to emit a long <think> block
+        # before answering. Under a schema constraint that thinking has nowhere to
+        # go, and the model can grind for minutes producing very little. Ollama
+        # exposes a switch; we only send it when asked, because older builds and
+        # non-reasoning models reject an unknown value.
+        if self.cfg.think is not None:
+            payload["think"] = self.cfg.think
+
         req = urllib.request.Request(
             f"{self.cfg.ollama_host}/api/chat",
             data=json.dumps(payload).encode(),
@@ -66,12 +95,38 @@ class OllamaProvider:
         try:
             with urllib.request.urlopen(req, timeout=self.cfg.llm_timeout) as resp:
                 body = json.loads(resp.read())
-        except urllib.error.URLError as exc:
+        except TimeoutError as exc:
+            # socket.timeout is TimeoutError, NOT urllib.error.URLError, so this
+            # used to escape as a raw traceback. Found on a first real review.
+            raise OllamaError(
+                f"{self.cfg.llm_model} did not answer within "
+                f"{self.cfg.llm_timeout}s.\n"
+                "  This is usually one of three things:\n"
+                "    * a reasoning model fighting the JSON schema -- try "
+                "`--model qwen2.5:7b-instruct`, or set SELFEVOLVE_LLM_THINK=false\n"
+                "    * a cold model -- run `ollama run "
+                f"{self.cfg.llm_model} \"\"` once, then retry\n"
+                "    * a large file -- SELFEVOLVE_MAX_INPUT_CHARS caps how much "
+                "is sent (currently "
+                f"{self.cfg.max_input_chars})\n"
+                "  Raise the ceiling with SELFEVOLVE_LLM_TIMEOUT if the model is "
+                "simply slow."
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
             raise OllamaError(
                 f"could not reach Ollama at {self.cfg.ollama_host} ({exc}). "
                 "Start it with `ollama serve`, or run with --backend fake."
             ) from exc
+
+        if body.get("error"):
+            raise OllamaError(f"Ollama returned an error: {body['error']}")
         content = body.get("message", {}).get("content", "")
+        if not content.strip():
+            raise OllamaError(
+                f"{self.cfg.llm_model} returned an empty response. Reasoning "
+                "models sometimes do this under a schema constraint -- try "
+                "`--model qwen2.5:7b-instruct` or SELFEVOLVE_LLM_THINK=false."
+            )
         return schema.model_validate_json(_strip_thinking(content))
 
     def available(self) -> bool:

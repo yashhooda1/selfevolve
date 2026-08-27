@@ -47,6 +47,15 @@ class Config:
     llm_model: str = _env("SELFEVOLVE_LLM_MODEL", "qwen3:8b")
     ollama_host: str = _env("OLLAMA_HOST", "http://127.0.0.1:11434")
     llm_timeout: int = _env_int("SELFEVOLVE_LLM_TIMEOUT", 180)
+    warm_timeout: int = _env_int("SELFEVOLVE_WARM_TIMEOUT", 120)
+    num_ctx: int = _env_int("SELFEVOLVE_NUM_CTX", 8192)
+    # How much of a file is actually sent for review. A 2,000-line module blows
+    # past the context window and turns a review into a several-minute wait for a
+    # worse answer; reviewing the first N characters well beats timing out.
+    max_input_chars: int = _env_int("SELFEVOLVE_MAX_INPUT_CHARS", 12000)
+    # None = don't send the field at all. "false" disables reasoning-model
+    # thinking, which is usually what you want under a schema constraint.
+    think: bool | None = None
 
     # --- retrieval ---
     top_k_insights: int = _env_int("SELFEVOLVE_TOP_K_INSIGHTS", 6)
@@ -55,6 +64,9 @@ class Config:
     retire_below: float = _env_float("SELFEVOLVE_RETIRE_BELOW", 0.15)
 
     def __post_init__(self) -> None:
+        raw_think = os.environ.get("SELFEVOLVE_LLM_THINK")
+        if raw_think is not None:
+            self.think = raw_think.strip().lower() in ("1", "true", "yes", "on")
         # Normalize a bare host into a URL, and tolerate the `host:port` form
         # Ollama's own docs use for OLLAMA_HOST.
         if not self.ollama_host.startswith(("http://", "https://")):
