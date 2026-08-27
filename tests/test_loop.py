@@ -174,3 +174,28 @@ def test_metrics_track_false_positive_rate(agent, cfg):
     m = ExperienceStore(cfg).metrics()
     assert m.reviews == 1 and m.items == 2
     assert m.acceptance_rate == 0.5 and m.false_positive_rate == 0.5
+
+
+def test_thorough_mode_changes_the_ask(cfg):
+    """Two modes with genuinely different instructions, not a cosmetic flag.
+
+    Default is tuned against false positives; thorough is tuned to produce
+    something to rule on. A store with no rules cannot teach anything, so the
+    bootstrapping case needs its own prompt.
+    """
+    ti = input_from_text(CODE, project="p1")
+
+    default = CodeReviewTask()
+    thorough = CodeReviewTask(thorough=True)
+
+    assert "do not invent problems" in default.system_prompt()
+    assert "Prefer 3-6 comments over" in thorough.system_prompt()
+
+    assert "empty item list" in default.act_prompt(ti, [], [])
+    assert "Aim for 3-6 comments" in thorough.act_prompt(ti, [], [])
+
+    # both still defer to learned rules -- thoroughness must not override a
+    # lesson that says a class of comment is noise
+    for task in (default, thorough):
+        assert "override your defaults" in task.system_prompt()
+        assert "do not produce that comment" in task.act_prompt(ti, [], [])

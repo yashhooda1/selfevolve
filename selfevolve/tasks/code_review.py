@@ -30,9 +30,39 @@ _EXT_LANG = {
 
 
 class CodeReviewTask(BaseTask):
+    """Two modes, because a review agent has two jobs at different times.
+
+    The default prompt is tuned hard against false positives -- explicitly told
+    not to invent problems, and that returning nothing is a valid answer. That is
+    right for steady-state use: once the agent knows your standards, silence is
+    informative.
+
+    It is wrong for bootstrapping. On a small local model that pressure tips into
+    saying nothing at all, and an agent that never comments can never learn --
+    there is nothing to rule on, so no lesson is ever created and the loop is
+    starved. `thorough=True` asks for candidates even when minor, accepting more
+    noise in exchange for something to give verdicts on. Use it to seed an empty
+    store, then drop back to the default.
+    """
+
     name = "code_review"
 
+    def __init__(self, thorough: bool = False):
+        self.thorough = thorough
+
     def system_prompt(self) -> str:
+        if self.thorough:
+            return (
+                "You are a senior code reviewer doing a first pass on an unfamiliar "
+                "codebase. Surface every concern worth a moment of an engineer's "
+                "attention: correctness, error handling, resource leaks, silent "
+                "failures, unvalidated input, performance traps, unclear naming. "
+                "Include minor ones — a human will decide what matters and their "
+                "verdicts are what the system learns from. Prefer 3-6 comments over "
+                "none. Still do not restate what the code does, and do not flag "
+                "formatting a linter already handles. Lessons from past reviews on "
+                "this codebase override your defaults."
+            )
         return (
             "You are a senior code reviewer. You produce a small number of "
             "high-signal comments. Each comment states a concrete concern and a "
@@ -67,8 +97,16 @@ Return each concern as an item with:
   tags     — short topic labels, e.g. ["correctness", "performance"]
 
 Apply every lesson above. If a lesson says a class of comment was rejected,
-do not produce that comment. Return an empty item list if you find nothing worth
-an engineer's time."""
+do not produce that comment.
+{self._closing()}"""
+
+    def _closing(self) -> str:
+        if self.thorough:
+            return (
+                "Aim for 3-6 comments. An empty list is only correct if the code is "
+                "genuinely without flaw, which is rare."
+            )
+        return "Return an empty item list if you find nothing worth an engineer's time."
 
     def reflect_prompt(self, task_input: TaskInput, item: Item, feedback: Feedback) -> str:
         header = {

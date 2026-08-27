@@ -93,13 +93,23 @@ else:
     BOLD = DIM = RED = GRN = YEL = CYN = RST = ""
 
 
-def _agent(cfg: Config) -> SelfEvolvingAgent:
+def _clear(previous: str) -> None:
+    """Blank a transient status line before printing over it.
+
+    Overwriting with \r alone leaves the tail of a longer previous line on
+    screen -- which is how "Reviewed in 22s" ended up followed by "s)…".
+    """
+    if previous:
+        print("\r" + " " * (len(previous) + 2) + "\r", end="")
+
+
+def _agent(cfg: Config, thorough: bool = False) -> SelfEvolvingAgent:
     llm = FakeProvider(cfg) if cfg.llm_backend == "fake" else get_provider(cfg)
-    return SelfEvolvingAgent(CodeReviewTask(), cfg=cfg, llm=llm)
+    return SelfEvolvingAgent(CodeReviewTask(thorough=thorough), cfg=cfg, llm=llm)
 
 
 def cmd_review(args, cfg: Config) -> int:
-    agent = _agent(cfg)
+    agent = _agent(cfg, thorough=args.thorough)
     ti = input_from_file(
         args.file, project=args.project, team=args.team, max_chars=cfg.max_input_chars
     )
@@ -115,19 +125,24 @@ def cmd_review(args, cfg: Config) -> int:
 
     # A local 8B model takes tens of seconds. Silence for that long reads as a
     # hang, and the first thing anyone does with a hang is kill it.
+    status = ""
     if isinstance(agent.llm, OllamaProvider):
-        print(f"{DIM}Loading {cfg.llm_model}…{RST}", end="", flush=True)
+        status = f"Loading {cfg.llm_model}…"
+        print(f"{DIM}{status}{RST}", end="", flush=True)
         agent.llm.warm()
-        print(f"\r{DIM}Reviewing with {cfg.llm_model} (up to {cfg.llm_timeout}s)…{RST}",
-              end="", flush=True)
+        status = f"Reviewing with {cfg.llm_model} (up to {cfg.llm_timeout}s)…"
+        print(f"\r{DIM}{status}{RST}", end="", flush=True)
 
     started = time.time()
     try:
         pending = agent.start(ti, thread_id)
     except OllamaError as exc:
-        print(f"\r{RED}{NO}{RST} {exc}")
+        _clear(status)
+        print(f"{RED}{NO}{RST} {exc}")
         return 1
-    print(f"\r{DIM}Reviewed in {time.time() - started:.0f}s{RST}" + " " * 30)
+    _clear(status)
+    if status:
+        print(f"{DIM}Reviewed in {time.time() - started:.0f}s{RST}")
 
     used = pending["retrieved_insights"]
     if used:
@@ -140,6 +155,14 @@ def cmd_review(args, cfg: Config) -> int:
     items = pending["items"]
     if not items:
         print(f"\n{GRN}No comments.{RST} Nothing to learn from this round.")
+        if not args.thorough:
+            print(
+                f"{DIM}The default prompt is tuned hard against false positives, which on a\n"
+                f"small local model can tip into saying nothing at all. An agent that never\n"
+                f"comments can never learn — there is nothing to rule on. If you expected\n"
+                f"findings here, retry with {RST}--thorough{DIM}, which asks for candidates\n"
+                f"even when minor. It is the right mode for seeding an empty store.{RST}"
+            )
         return 0
 
     print(f"\n{BOLD}{len(items)} comment(s){RST}\n")
@@ -389,6 +412,10 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--project", default="default")
     r.add_argument("--team", default="any")
     r.add_argument("--thread", default=None)
+    r.add_argument(
+        "--thorough", action="store_true",
+        help="surface candidate concerns even when minor; use this to seed an empty store",
+    )
     r.set_defaults(fn=cmd_review)
 
     i = sub.add_parser("insights")
