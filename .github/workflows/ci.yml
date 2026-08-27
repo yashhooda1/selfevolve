@@ -92,3 +92,18 @@ jobs:
           python-version: "3.12"
       - run: pip install ruff
       - run: ruff check .
+
+  modelfile:
+    name: published Modelfile is in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      # The Ollama model published from this repo embeds the reviewer's system
+      # prompt. If someone tunes the prompt in the task and forgets to
+      # regenerate, the published model silently stops matching the repo it
+      # claims to come from.
+      - run: python scripts/build_modelfile.py --check

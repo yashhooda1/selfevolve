@@ -287,3 +287,14 @@ def test_output_has_no_escape_codes_when_piped():
         capture_output=True, text=True, cwd=ROOT, env=env, check=True,
     )
     assert "\033[" not in out.stdout, "ANSI codes leaked into piped output"
+
+
+def test_published_modelfile_matches_the_task():
+    """A published Ollama model that hard-codes a stale copy of the system prompt
+    is worse than none — it claims to come from this repo while behaving
+    differently. Fail the build rather than let the two drift."""
+    out = subprocess.run(
+        [sys.executable, "scripts/build_modelfile.py", "--check"],
+        capture_output=True, text=True, cwd=ROOT,
+    )
+    assert out.returncode == 0, out.stdout + out.stderr

@@ -289,6 +289,43 @@ Every setting is an environment variable — `SELFEVOLVE_LLM_BACKEND`,
 something on this machine, and `doctor` tells you if you've overridden one to something
 that isn't loopback.
 
+## Publishing
+
+Three different registries, three different artifacts. They are not interchangeable.
+
+**GitHub — the code.** This is where the project lives.
+
+```bash
+gh repo create hoodarunner/selfevolve --public --source=. --remote=origin --push
+```
+
+**PyPI — the installable package.** So people can `pip install selfevolve` without cloning.
+
+```bash
+pip install build twine
+python -m build
+twine upload dist/*
+```
+
+**Ollama — a reviewer model, not the app.** ollama.com hosts model weights, so the
+application cannot go there. What can is a `qwen3:8b` variant preloaded with the
+reviewer's system prompt, for anyone who wants to try the review step with no install:
+
+```bash
+ollama create hoodarunner/selfevolve-reviewer -f ollama/Modelfile
+ollama push hoodarunner/selfevolve-reviewer
+```
+
+See [`ollama/README.md`](ollama/README.md) for key setup and the important caveat: that
+model does **not** carry your learned rules, and pointing `selfevolve` at it does not
+change the agent's behaviour. Your rules live in `experience.db` on your machine and are
+injected per request. A public registry can't hold your accumulated judgement — and
+shouldn't.
+
+That's the premise restated: the learning is in the application, not the weights.
+
+---
+
 ## Honest limitations
 
 **Hashed-fallback retrieval is weak.** Without Ollama, embeddings are hashed n-grams — a
