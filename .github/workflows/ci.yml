@@ -64,23 +64,29 @@ jobs:
           SELFEVOLVE_DATA_DIR: ./.ci-store
         run: |
           set -e
-          # Review, reject the docstring nit, and assert the lesson is retrieved
-          # on a different file — the property that makes this an evolving agent
-          # rather than a stateless one.
+          # Every path here is relative to the workspace. /tmp is a trap on a
+          # Windows runner: `shell: bash` is Git Bash, so MSYS tools resolve
+          # /tmp to the MSYS temp directory, while native python.exe reads the
+          # same string as C:\tmp. A file written by one is invisible to the
+          # other, which is exactly how this step failed -- the grep steps passed
+          # (both MSYS) and only the python one blew up.
           printf 'a\n\nr\nlinter covers docstrings\n' \
             | selfevolve --backend fake review examples/sample_code/pipeline.py --project ci
-          selfevolve insights | tee /tmp/rules.txt
-          grep -qi "docstring" /tmp/rules.txt || { echo "no rule was learned"; exit 1; }
+          selfevolve insights | tee ci-rules.txt
+          grep -qi "docstring" ci-rules.txt || { echo "no rule was learned"; exit 1; }
 
+          # Different file, different names, same classes of issue: the rejected
+          # comment must not come back. This is the property that makes it an
+          # evolving agent rather than a stateless one.
           printf 's\n' \
             | selfevolve --backend fake review examples/sample_code/handlers.py --project ci \
-            | tee /tmp/second.txt
-          grep -qi "Retrieved 1 lesson" /tmp/second.txt || { echo "lesson was not retrieved"; exit 1; }
-          grep -qi "docstring" /tmp/second.txt || { echo "retrieved rule not shown"; exit 1; }
+            | tee ci-second.txt
+          grep -qi "Retrieved 1 lesson" ci-second.txt || { echo "lesson was not retrieved"; exit 1; }
+          grep -qi "docstring" ci-second.txt || { echo "retrieved rule not shown"; exit 1; }
 
           selfevolve metrics
-          selfevolve export --out /tmp/lessons.json
-          python -c "import json,sys; d=json.load(open('/tmp/lessons.json')); assert d['insights'], 'empty export'; print('export ok:', len(d['insights']), 'rules')"
+          selfevolve export --out ci-lessons.json
+          python -c "import json; d=json.load(open('ci-lessons.json', encoding='utf-8')); assert d['insights'], 'empty export'; print('export ok:', len(d['insights']), 'rules')"
 
   lint:
     name: ruff
@@ -90,6 +96,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # Pinned floor: the rule set is fixed in pyproject, but pin the tool too so
+      # a lint failure always means the code changed, never that ruff did.
       - run: pip install "ruff>=0.15,<0.17"
       - run: ruff check .
 

@@ -41,6 +41,11 @@ def _env(**overrides):
     env = dict(os.environ)
     env.setdefault("SELFEVOLVE_EMBED_BACKEND", "hash")
     env.setdefault("SELFEVOLVE_LLM_BACKEND", "fake")
+    # Pin the child's stdout encoding. Without this it inherits the platform code
+    # page -- cp1252 on a US Windows runner, UTF-8 on Linux -- and any test that
+    # decodes child output has a different contract per platform. Tests that care
+    # about a legacy code page override this explicitly.
+    env.setdefault("PYTHONIOENCODING", "utf-8")
     env.update(overrides)
     return env
 
@@ -187,7 +192,7 @@ def test_no_remote_urls_in_source():
     """
     offenders = []
     for path in (ROOT / "selfevolve").rglob("*.py"):
-        for n, line in enumerate(path.read_text().splitlines(), 1):
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             stripped = line.strip()
             if stripped.startswith("#") or stripped.startswith('"') or stripped.startswith("'"):
                 continue
@@ -260,7 +265,7 @@ def test_doctor_exits_zero(tmp_path):
     env = _env(SELFEVOLVE_DATA_DIR=str(tmp_path / "doc"))
     out = subprocess.run(
         [sys.executable, "-m", "selfevolve.cli", "doctor"],
-        capture_output=True, text=True, cwd=ROOT, env=env,
+        capture_output=True, cwd=ROOT, env=env, encoding="utf-8",
     )
     assert out.returncode == 0, out.stdout + out.stderr
     assert "Full loop completed with the network cut" in out.stdout
@@ -272,7 +277,7 @@ def test_doctor_leaves_no_rules_behind(tmp_path):
     env = _env(SELFEVOLVE_DATA_DIR=str(data_dir))
     subprocess.run(
         [sys.executable, "-m", "selfevolve.cli", "doctor"],
-        capture_output=True, text=True, cwd=ROOT, env=env, check=True,
+        capture_output=True, cwd=ROOT, env=env, check=True, encoding="utf-8",
     )
     cfg = Config(data_dir=data_dir)
     store = ExperienceStore(cfg)
@@ -328,7 +333,7 @@ def test_output_has_no_escape_codes_when_piped():
     env = _env(SELFEVOLVE_DATA_DIR=str(Path(tempfile.mkdtemp()) / "pipe"))
     out = subprocess.run(
         [sys.executable, "-m", "selfevolve.cli", "metrics"],
-        capture_output=True, text=True, cwd=ROOT, env=env, check=True,
+        capture_output=True, cwd=ROOT, env=env, check=True, encoding="utf-8",
     )
     assert "\033[" not in out.stdout, "ANSI codes leaked into piped output"
 
@@ -339,7 +344,7 @@ def test_published_modelfile_matches_the_task():
     differently. Fail the build rather than let the two drift."""
     out = subprocess.run(
         [sys.executable, "scripts/build_modelfile.py", "--check"],
-        capture_output=True, text=True, cwd=ROOT,
+        capture_output=True, cwd=ROOT, encoding="utf-8",
     )
     assert out.returncode == 0, out.stdout + out.stderr
 

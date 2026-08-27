@@ -11,3 +11,6 @@ dist/
 .ruff_cache/
 .env
 *.db
+ci-rules.txt
+ci-second.txt
+ci-lessons.json
