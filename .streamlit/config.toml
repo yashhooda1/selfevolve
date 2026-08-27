@@ -1,0 +1,17 @@
+# Streamlit phones home for usage stats and version checks by default.
+# This file turns both off before the app starts, so the offline guarantee
+# holds even if someone launches `streamlit run` without going through the CLI.
+[browser]
+gatherUsageStats = false
+serverAddress = "localhost"
+
+[server]
+headless = true
+address = "127.0.0.1"
+fileWatcherType = "poll"
+
+[global]
+showWarningOnDirectExecution = false
+
+[runner]
+fastReruns = true

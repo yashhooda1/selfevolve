@@ -1,0 +1,110 @@
+name: airgap
+
+# The claim this repo makes is that nothing here needs the internet. This
+# workflow tries to falsify that claim the only way that counts: it installs the
+# package, then severs the network at the OS level and runs the entire test
+# suite inside the severed environment.
+#
+# `unshare -n` puts the test process in a fresh network namespace with no
+# interfaces at all — not a firewall rule, not a monkeypatched socket, no
+# route to anywhere. The runner keeps its own network so it can still report
+# results; the Python process simply has none.
+#
+# If any dependency, import, or line of code needs to reach a host, this job
+# goes red.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Monthly. A dependency can grow a phone-home in a patch release without
+    # anything in this repo changing, and a green badge that only reflects the
+    # last commit would hide that.
+    - cron: "0 9 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  airgap:
+    name: full suite with the network severed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The only step that touches the network. Everything after this runs cut off.
+      - name: Install (network still up)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Confirm the namespace really has no network
+        run: |
+          set -e
+          echo "--- outside the namespace ---"
+          curl -sS --max-time 10 -o /dev/null -w "pypi.org reachable: %{http_code}\n" https://pypi.org
+
+          echo "--- inside the namespace ---"
+          sudo unshare -n -- sh -c '
+            ip link set lo up 2>/dev/null || true
+            ip -brief addr show 2>/dev/null || true
+            if curl -sS --max-time 5 https://pypi.org > /dev/null 2>&1; then
+              echo "FAIL: the namespace still has network — this job would prove nothing"
+              exit 1
+            fi
+            echo "OK: no route to anywhere"
+          '
+
+      - name: Run the full test suite with no network
+        run: |
+          sudo unshare -n -- sh -c "
+            ip link set lo up 2>/dev/null || true
+            cd '$GITHUB_WORKSPACE'
+            HOME=/tmp SELFEVOLVE_DATA_DIR=/tmp/se '$(which python)' -m pytest tests -q
+          "
+
+      - name: selfevolve doctor, with no network
+        run: |
+          sudo unshare -n -- sh -c "
+            ip link set lo up 2>/dev/null || true
+            cd '$GITHUB_WORKSPACE'
+            HOME=/tmp SELFEVOLVE_DATA_DIR=/tmp/se-doctor \
+            SELFEVOLVE_EMBED_BACKEND=hash SELFEVOLVE_LLM_BACKEND=fake \
+            '$(which python)' -m selfevolve.cli doctor
+          "
+
+      - name: Audit the runtime dependency tree
+        # The offline guarantee is only as good as what gets installed. This runs
+        # in a FRESH venv with no dev extras — otherwise pytest/ruff sit in the
+        # listing and it's no longer obvious what the runtime actually pulls.
+        # Any banned name appearing means something grew a transitive HTTP client
+        # or a weights downloader, and the guarantee is gone.
+        run: |
+          set -e
+          python -m venv /tmp/auditenv
+          /tmp/auditenv/bin/pip install -q --upgrade pip
+          /tmp/auditenv/bin/pip install -q .
+          /tmp/auditenv/bin/pip list --format=freeze > /tmp/installed.txt
+
+          echo "Runtime dependency tree:"
+          grep -viE "^(pip|setuptools|wheel)==" /tmp/installed.txt
+
+          BANNED="requests httpx aiohttp urllib3 huggingface-hub sentence-transformers chromadb langchain langchain-core langsmith langgraph posthog onnxruntime openai anthropic"
+          FAILED=0
+          for pkg in $BANNED; do
+            if grep -qi "^${pkg}==" /tmp/installed.txt; then
+              echo "::error::banned dependency present: $pkg"
+              FAILED=1
+            fi
+          done
+          if [ "$FAILED" = "1" ]; then
+            echo "The offline guarantee depends on none of these being installed."
+            exit 1
+          fi
+          echo "Clean — no HTTP client, no telemetry SDK, no weights downloader."

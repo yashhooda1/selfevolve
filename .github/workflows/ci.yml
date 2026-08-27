@@ -1,0 +1,90 @@
+name: tests
+
+# Ordinary correctness across supported Pythons and platforms. The offline
+# guarantee is proven separately in airgap.yml — this workflow answers "does it
+# work", that one answers "does it stay local".
+#
+# No secrets, no services, no network calls in the tests themselves. A fork PR
+# runs this green with nothing configured.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: py${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          # SQLite and socket behaviour differ enough across platforms to be
+          # worth one run each, without paying for the full matrix.
+          - os: macos-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Test
+        run: pytest tests -q
+
+      - name: Smoke-test the CLI end to end
+        shell: bash
+        env:
+          SELFEVOLVE_EMBED_BACKEND: hash
+          SELFEVOLVE_LLM_BACKEND: fake
+          SELFEVOLVE_DATA_DIR: ./.ci-store
+        run: |
+          set -e
+          # Review, reject the docstring nit, and assert the lesson is retrieved
+          # on a different file — the property that makes this an evolving agent
+          # rather than a stateless one.
+          printf 'a\n\nr\nlinter covers docstrings\n' \
+            | selfevolve --backend fake review examples/sample_code/pipeline.py --project ci
+          selfevolve insights | tee /tmp/rules.txt
+          grep -qi "docstring" /tmp/rules.txt || { echo "no rule was learned"; exit 1; }
+
+          printf 's\n' \
+            | selfevolve --backend fake review examples/sample_code/handlers.py --project ci \
+            | tee /tmp/second.txt
+          grep -qi "Retrieved 1 lesson" /tmp/second.txt || { echo "lesson was not retrieved"; exit 1; }
+          grep -qi "docstring" /tmp/second.txt || { echo "retrieved rule not shown"; exit 1; }
+
+          selfevolve metrics
+          selfevolve export --out /tmp/lessons.json
+          python -c "import json,sys; d=json.load(open('/tmp/lessons.json')); assert d['insights'], 'empty export'; print('export ok:', len(d['insights']), 'rules')"
+
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check .

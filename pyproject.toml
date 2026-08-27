@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "selfevolve"
+version = "0.2.0"
+description = "A fully offline self-evolving agent: learns from human feedback, stores lessons in one SQLite file, runs on local Ollama. No network, ever."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Yash Hooda" }]
+keywords = ["agents", "offline", "airgap", "expel", "ollama", "sqlite", "human-in-the-loop", "local-first"]
+
+# One dependency. Everything else — the state machine, the checkpointer, the
+# vector store, the embedding cache, the HTTP client for Ollama — is stdlib.
+# That is not minimalism for its own sake: every dependency in an offline build
+# is a package that might phone home, and this is the whole list to audit.
+dependencies = [
+    "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+ui = ["streamlit>=1.36"]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+all = ["streamlit>=1.36", "pytest>=8.0", "ruff>=0.5"]
+
+[project.scripts]
+selfevolve = "selfevolve.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["selfevolve*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
