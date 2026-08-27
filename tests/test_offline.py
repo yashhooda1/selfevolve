@@ -430,3 +430,22 @@ def test_oversized_file_is_capped_and_reported(tmp_path):
 
     untouched = input_from_file(big, project="p", max_chars=None)
     assert untouched.meta["truncated_chars"] == 0
+
+
+def test_model_card_names_the_model_we_actually_ship():
+    """A model card is marketing copy for a real artifact. If it names a model
+    the Modelfile does not use, it is describing something that doesn't exist."""
+    from selfevolve.config import Config
+
+    card = (ROOT / "ollama" / "MODEL_CARD.md").read_text(encoding="utf-8")
+    modelfile = (ROOT / "ollama" / "Modelfile").read_text(encoding="utf-8")
+    model = Config().llm_model
+
+    assert f"FROM {model}" in modelfile
+    assert model in card, f"MODEL_CARD.md does not mention {model}"
+    assert "does not learn" in card, "the card must be explicit about what it is not"
+
+
+def test_ollama_readme_has_no_stale_model_reference():
+    readme = (ROOT / "ollama" / "README.md").read_text(encoding="utf-8")
+    assert "qwen3:8b" not in readme, "stale base model in ollama/README.md"

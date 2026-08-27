@@ -1,7 +1,12 @@
 # Publishing the reviewer to Ollama
 
+> **Namespaces differ.** The code lives at `github.com/yashhooda1/selfevolve`; the model
+> lives at `ollama.com/hoodarunner/selfevolve-reviewer`. `hoodarunner` is the Ollama and
+> HuggingFace handle, `yashhooda1` is the GitHub one. The `ollama create` name must match
+> your **Ollama** username or the push is rejected.
+
 Ollama's registry hosts **models**, not applications. `selfevolve` itself is a Python
-package — it belongs on GitHub and PyPI. What can go to ollama.com is this: a `qwen3:8b`
+package — it belongs on GitHub and PyPI. What can go to ollama.com is this: a `qwen2.5:7b-instruct`
 variant preloaded with the reviewer's system prompt and decoding settings, so anyone can
 run the review step directly:
 
@@ -29,6 +34,16 @@ ollama push hoodarunner/selfevolve-reviewer
 
 It lands at `https://ollama.com/hoodarunner/selfevolve-reviewer`. Re-running
 `ollama push` after a change republishes it.
+
+## The model card
+
+The Modelfile format has no description or README field — `FROM`, `PARAMETER`,
+`TEMPLATE`, `SYSTEM`, `ADAPTER`, `LICENSE`, `MESSAGE` and nothing else. The text on
+the model's ollama.com page is edited on the website after the first push.
+
+`MODEL_CARD.md` in this directory is that text, kept in version control so it can't
+drift from the repo the way an untracked web form does. Paste it into the
+description field on the model page after pushing.
 
 ## Point selfevolve at it
 

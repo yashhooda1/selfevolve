@@ -51,7 +51,11 @@ def render() -> str:
         f"# Low temperature: review comments should be reproducible, not creative.\n"
         f"PARAMETER temperature 0.2\n"
         f"PARAMETER num_ctx 8192\n\n"
-        f'SYSTEM """{prompt}"""\n'
+        f'SYSTEM """{prompt}"""\n\n'
+        f'# LICENSE is one of the few instructions the format supports, and it\n'
+        f'# travels with the model -- unlike a description, which lives only on\n'
+        f'# the website. See ollama/MODEL_CARD.md for that.\n'
+        f'LICENSE """MIT — https://github.com/yashhooda1/selfevolve/blob/main/LICENSE"""\n'
     )
 
 
