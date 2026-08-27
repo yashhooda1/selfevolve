@@ -24,15 +24,51 @@ from .offline import airgap, report
 from .store import ExperienceStore
 from .tasks.code_review import CodeReviewTask, input_from_file, input_from_text
 
-BOLD, DIM, RED, GRN, YEL, CYN, RST = (
-    "\033[1m",
-    "\033[2m",
-    "\033[31m",
-    "\033[32m",
-    "\033[33m",
-    "\033[36m",
-    "\033[0m",
-)
+def _supports_ansi() -> bool:
+    """Decide whether to emit colour, and on Windows, turn it on.
+
+    Three cases this handles:
+      * output is piped or redirected -> no escape codes, so `selfevolve insights
+        > rules.txt` produces a clean file instead of one full of `<-[1m`
+      * NO_COLOR is set -> respect it (the no-color.org convention)
+      * Windows console -> conhost needs VT processing switched on explicitly.
+        It has supported it since Win10 1809 but does not always enable it, and
+        without this the output is escape-code soup rather than bold text.
+    """
+    import os
+
+    if os.environ.get("NO_COLOR"):
+        return False
+    if not sys.stdout.isatty():
+        return False
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32
+            # -11 = STD_OUTPUT_HANDLE, 0x0004 = ENABLE_VIRTUAL_TERMINAL_PROCESSING
+            handle = kernel32.GetStdHandle(-11)
+            mode = ctypes.c_ulong()
+            if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+                return False
+            return bool(kernel32.SetConsoleMode(handle, mode.value | 0x0004))
+        except Exception:
+            return False
+    return True
+
+
+if _supports_ansi():
+    BOLD, DIM, RED, GRN, YEL, CYN, RST = (
+        "\033[1m",
+        "\033[2m",
+        "\033[31m",
+        "\033[32m",
+        "\033[33m",
+        "\033[36m",
+        "\033[0m",
+    )
+else:
+    BOLD = DIM = RED = GRN = YEL = CYN = RST = ""
 
 
 def _agent(cfg: Config) -> SelfEvolvingAgent:
@@ -190,6 +226,12 @@ def cmd_doctor(args, cfg: Config) -> int:
 
     if info["leaked_keys"]:
         print(f"\n  {RED}tracing keys still in env:{RST} {', '.join(info['leaked_keys'])}")
+
+    sync_warning = cfg.sync_folder_warning()
+    if sync_warning:
+        print(f"\n  {YEL}⚠ cloud-sync folder{RST}")
+        for line in sync_warning.splitlines():
+            print(f"    {line}")
 
     probe = OllamaProvider(cfg)
     if probe.available():

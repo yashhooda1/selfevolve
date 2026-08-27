@@ -65,6 +65,38 @@ class Config:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         return self.data_dir
 
+    def sync_folder_warning(self) -> str | None:
+        """Detect a database sitting inside a cloud-sync folder.
+
+        SQLite and file sync are a genuinely bad pair. OneDrive, Dropbox and
+        iCloud copy a file whenever it changes, with no idea that a database has
+        a journal that must stay consistent with it — and OneDrive on Windows can
+        also hold a lock mid-upload, which surfaces as "database is locked" at
+        random. The failure is intermittent and looks like a bug in this program.
+
+        This never blocks anything; it prints a warning once so that when it does
+        go wrong, you know why.
+        """
+        parts = {p.lower() for p in self.data_dir.resolve().parts}
+        for marker, name in (
+            ("onedrive", "OneDrive"),
+            ("dropbox", "Dropbox"),
+            ("google drive", "Google Drive"),
+            ("googledrive", "Google Drive"),
+            ("icloud drive", "iCloud Drive"),
+            ("com~apple~clouddocs", "iCloud Drive"),
+        ):
+            if any(marker in p for p in parts):
+                return (
+                    f"experience.db is inside {name}, which syncs files as they change. "
+                    "SQLite does not tolerate that well — expect intermittent "
+                    '"database is locked" errors and, rarely, corruption. '
+                    "Point SELFEVOLVE_DATA_DIR somewhere outside it:\n"
+                    "    setx SELFEVOLVE_DATA_DIR \"%USERPROFILE%\\.selfevolve\"    (Windows)\n"
+                    "    export SELFEVOLVE_DATA_DIR=~/.selfevolve                 (macOS/Linux)"
+                )
+        return None
+
     def db_path(self) -> Path:
         return self.ensure_dir() / self.db_file
 

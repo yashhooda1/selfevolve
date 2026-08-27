@@ -257,3 +257,33 @@ def test_everything_lives_in_one_portable_file(cfg):
     assert len(reopened.all_insights()) >= 1
     assert len(reopened.all_trajectories()) == 1
     reopened.close()
+
+
+# --------------------------------------------------- platform / environment
+
+def test_cloud_sync_folder_is_detected(tmp_path):
+    """SQLite inside OneDrive/Dropbox fails intermittently and blames us for it.
+    Warn instead of letting someone debug 'database is locked' for an evening."""
+    for path, expected in [
+        (r"C:/Users/y/OneDrive/Desktop/proj/.selfevolve", "OneDrive"),
+        ("/home/y/Dropbox/proj/.selfevolve", "Dropbox"),
+        ("/Users/y/Library/Mobile Documents/com~apple~CloudDocs/se", "iCloud Drive"),
+    ]:
+        warning = Config(data_dir=Path(path)).sync_folder_warning()
+        assert warning and expected in warning, f"missed {expected} in {path}"
+    assert Config(data_dir=tmp_path / "plain").sync_folder_warning() is None
+
+
+def test_output_has_no_escape_codes_when_piped():
+    """Piping a command must produce a clean file, not escape-code soup —
+    the default on a Windows console that hasn't enabled VT."""
+    env = {
+        "SELFEVOLVE_DATA_DIR": "/tmp/se-pipe", "SELFEVOLVE_EMBED_BACKEND": "hash",
+        "SELFEVOLVE_LLM_BACKEND": "fake", "PATH": "/usr/bin:/bin:/usr/local/bin",
+        "HOME": "/tmp",
+    }
+    out = subprocess.run(
+        [sys.executable, "-m", "selfevolve.cli", "metrics"],
+        capture_output=True, text=True, cwd=ROOT, env=env, check=True,
+    )
+    assert "\033[" not in out.stdout, "ANSI codes leaked into piped output"

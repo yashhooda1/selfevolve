@@ -28,12 +28,16 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python: ["3.10", "3.11", "3.12", "3.13"]
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         include:
-          # SQLite and socket behaviour differ enough across platforms to be
-          # worth one run each, without paying for the full matrix.
+          # SQLite, console/ANSI, and path behaviour differ enough across
+          # platforms to be worth a run each. Windows gets 3.14 specifically —
+          # that's what the author actually develops on, and a matrix that
+          # doesn't cover the machine the code is written on is decoration.
           - os: macos-latest
             python: "3.12"
+          - os: windows-latest
+            python: "3.14"
           - os: windows-latest
             python: "3.12"
     steps:

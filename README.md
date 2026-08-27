@@ -2,7 +2,7 @@
 
 [![airgap](https://github.com/hoodarunner/selfevolve/actions/workflows/airgap.yml/badge.svg)](https://github.com/hoodarunner/selfevolve/actions/workflows/airgap.yml)
 [![tests](https://github.com/hoodarunner/selfevolve/actions/workflows/ci.yml/badge.svg)](https://github.com/hoodarunner/selfevolve/actions/workflows/ci.yml)
-[![python](https://img.shields.io/badge/python-3.10--3.13-blue)](pyproject.toml)
+[![python](https://img.shields.io/badge/python-3.10--3.14-blue)](pyproject.toml)
 [![dependencies](https://img.shields.io/badge/runtime%20deps-pydantic-brightgreen)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
@@ -87,6 +87,8 @@ That's the entire audit surface.
 ```bash
 pip install -e ".[all]"
 selfevolve doctor                    # works before you pull anything
+# if your shell can't find `selfevolve`, its scripts dir isn't on PATH —
+# `python -m selfevolve.cli doctor` is identical and always works
 
 ollama pull qwen3:8b                 # generation
 ollama pull nomic-embed-text         # embeddings — one download, then offline forever
@@ -259,6 +261,24 @@ external connections and permits loopback; the full loop runs with even loopback
 banned network library is in the import graph; no executable line names a remote host;
 `doctor` exits zero and leaves no rules behind; and the database survives being copied to
 another path.
+
+## Where the database lives
+
+Default is `./.selfevolve/experience.db`, relative to wherever you run the command.
+Set `SELFEVOLVE_DATA_DIR` to pin it somewhere stable:
+
+```bash
+setx SELFEVOLVE_DATA_DIR "%USERPROFILE%\.selfevolve"     # Windows
+export SELFEVOLVE_DATA_DIR=~/.selfevolve                  # macOS / Linux
+```
+
+**Do not put it inside OneDrive, Dropbox, iCloud, or Google Drive.** Those services copy
+a file whenever it changes, with no idea that a database has a journal that has to stay
+consistent with it — and OneDrive on Windows can hold a lock mid-upload, which surfaces as
+intermittent `database is locked` errors that look like a bug in this program. `doctor`
+warns you if it detects one of those folders.
+
+---
 
 ## Configuration
 
