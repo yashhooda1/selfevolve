@@ -1,0 +1,42 @@
+From 7dc4740d14753a80e56a7f50fb98f7fb15f74a21 Mon Sep 17 00:00:00 2001
+From: Yash Hooda <yash.hooda6@gmail.com>
+Date: Thu, 27 Aug 2026 01:00:54 +0000
+Subject: [PATCH 3/3] Add .gitattributes to pin line endings
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A Windows checkout was about to commit CRLF into every file. Harmless for
+Python, but CRLF in verify.sh means "bad interpreter" on Linux — a break
+that only appears in CI. LF everywhere, except .cmd/.bat which cmd.exe
+wants as CRLF.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01YEPpTfqvKcxQrfaydM28UE
+---
+ .gitattributes | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+ create mode 100644 .gitattributes
+
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..f84a09e
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1,13 @@
++# Normalize line endings. Without this, a Windows checkout commits CRLF into
++# shell scripts, and `verify.sh` then fails on Linux with "bad interpreter" —
++# a failure that only shows up in CI, which is the worst place to find it.
++* text=auto eol=lf
++
++# Batch files are the exception: cmd.exe wants CRLF.
++*.cmd text eol=crlf
++*.bat text eol=crlf
++
++# Never touch these.
++*.db binary
++*.png binary
++*.jpg binary
+-- 
+2.43.0
+

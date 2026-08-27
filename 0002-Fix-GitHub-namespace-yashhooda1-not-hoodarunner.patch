@@ -1,0 +1,65 @@
+From 201a89bb73aa4773a45a9114390dee6eb239fb0e Mon Sep 17 00:00:00 2001
+From: Yash Hooda <yash.hooda6@gmail.com>
+Date: Thu, 27 Aug 2026 00:58:39 +0000
+Subject: [PATCH 2/3] Fix GitHub namespace: yashhooda1, not hoodarunner
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The badge URLs and gh command assumed one namespace for everything.
+They are two: GitHub is yashhooda1, while hoodarunner is the Ollama and
+HuggingFace handle. `gh repo create hoodarunner/...` fails outright.
+
+Only the GitHub references change. The Ollama model name stays
+hoodarunner/selfevolve-reviewer — it has to match the Ollama username or
+the push is rejected — and ollama/README.md now says so explicitly, so
+the two don't get conflated again.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01YEPpTfqvKcxQrfaydM28UE
+---
+ README.md        | 6 +++---
+ ollama/README.md | 5 +++++
+ 2 files changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/README.md b/README.md
+index fe21884..26dde4e 100644
+--- a/README.md
++++ b/README.md
+@@ -1,7 +1,7 @@
+ # selfevolve
+ 
+-[![airgap](https://github.com/hoodarunner/selfevolve/actions/workflows/airgap.yml/badge.svg)](https://github.com/hoodarunner/selfevolve/actions/workflows/airgap.yml)
+-[![tests](https://github.com/hoodarunner/selfevolve/actions/workflows/ci.yml/badge.svg)](https://github.com/hoodarunner/selfevolve/actions/workflows/ci.yml)
++[![airgap](https://github.com/yashhooda1/selfevolve/actions/workflows/airgap.yml/badge.svg)](https://github.com/yashhooda1/selfevolve/actions/workflows/airgap.yml)
++[![tests](https://github.com/yashhooda1/selfevolve/actions/workflows/ci.yml/badge.svg)](https://github.com/yashhooda1/selfevolve/actions/workflows/ci.yml)
+ [![python](https://img.shields.io/badge/python-3.10--3.14-blue)](pyproject.toml)
+ [![dependencies](https://img.shields.io/badge/runtime%20deps-pydantic-brightgreen)](pyproject.toml)
+ [![license](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
+@@ -310,7 +310,7 @@ Three different registries, three different artifacts. They are not interchangea
+ **GitHub — the code.** This is where the project lives.
+ 
+ ```bash
+-gh repo create hoodarunner/selfevolve --public --source=. --remote=origin --push
++gh repo create yashhooda1/selfevolve --public --source=. --remote=origin --push
+ ```
+ 
+ **PyPI — the installable package.** So people can `pip install selfevolve` without cloning.
+diff --git a/ollama/README.md b/ollama/README.md
+index abca814..4202ad9 100644
+--- a/ollama/README.md
++++ b/ollama/README.md
+@@ -1,5 +1,10 @@
+ # Publishing the reviewer to Ollama
+ 
++> **Namespaces differ.** The code lives at `github.com/yashhooda1/selfevolve`; the model
++> lives at `ollama.com/hoodarunner/selfevolve-reviewer`. `hoodarunner` is the Ollama and
++> HuggingFace handle, `yashhooda1` is the GitHub one. The `ollama create` name must match
++> your **Ollama** username or the push is rejected.
++
+ Ollama's registry hosts **models**, not applications. `selfevolve` itself is a Python
+ package — it belongs on GitHub and PyPI. What can go to ollama.com is this: a `qwen3:8b`
+ variant preloaded with the reviewer's system prompt and decoding settings, so anyone can
+-- 
+2.43.0
+

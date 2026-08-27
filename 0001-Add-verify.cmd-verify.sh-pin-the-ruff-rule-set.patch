@@ -1,0 +1,473 @@
+From 1f2865b24eda681ef3353954d22f24b6ccfe9859 Mon Sep 17 00:00:00 2001
+From: Yash Hooda <yash.hooda6@gmail.com>
+Date: Thu, 27 Aug 2026 00:56:16 +0000
+Subject: [PATCH 1/3] Add verify.cmd/verify.sh; pin the ruff rule set
+
+One command to rerun the whole folder: install, test, lint, prove
+offline, then a demo that teaches a lesson and shows it applied to a
+different file. Uses `python -m selfevolve.cli` throughout so it works
+without Python's scripts dir on PATH.
+
+`reset` gains --yes. An interactive confirmation prompt is hostile to
+scripts and awkward to pipe on Windows.
+
+Pin the ruff rule set explicitly in pyproject, and pin the tool to
+>=0.15,<0.17 in CI. Found this by running the new script: ruff 0.16
+expanded its default rule set over 0.15 and reported 43 new errors on
+unchanged code. An unpinned `pip install ruff` in CI is a build that can
+go red without anyone touching the repo. Both versions now agree.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01YEPpTfqvKcxQrfaydM28UE
+---
+ .github/workflows/ci.yml         |  4 +-
+ README.md                        | 14 +++++
+ examples/sample_code/pipeline.py |  3 +-
+ pyproject.toml                   | 21 +++++++-
+ selfevolve/__init__.py           |  2 +-
+ selfevolve/cli.py                | 18 +++++--
+ selfevolve/embeddings.py         |  5 +-
+ selfevolve/graph.py              |  2 +-
+ selfevolve/llm.py                |  2 +-
+ selfevolve/models.py             |  4 +-
+ selfevolve/store.py              |  6 +--
+ tests/test_offline.py            |  2 +-
+ verify.cmd                       | 91 ++++++++++++++++++++++++++++++++
+ verify.sh                        | 74 ++++++++++++++++++++++++++
+ 14 files changed, 229 insertions(+), 19 deletions(-)
+ create mode 100644 verify.cmd
+ create mode 100755 verify.sh
+
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 9c2990c..c4b6677 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -90,7 +90,9 @@ jobs:
+       - uses: actions/setup-python@v5
+         with:
+           python-version: "3.12"
+-      - run: pip install ruff
++      # Pinned floor: the rule set is fixed in pyproject, but pin the tool too so
++      # a lint failure always means the code changed, never that ruff did.
++      - run: pip install "ruff>=0.15,<0.17"
+       - run: ruff check .
+ 
+   modelfile:
+diff --git a/README.md b/README.md
+index 9a7ba01..fe21884 100644
+--- a/README.md
++++ b/README.md
+@@ -97,6 +97,20 @@ selfevolve review examples/sample_code/pipeline.py --project etl
+ streamlit run app/streamlit_app.py
+ ```
+ 
++### Rerun everything
++
++One command: install, test, lint, prove offline, and run a demo that teaches it a lesson
++and shows the lesson applied to a different file.
++
++```bash
++verify.cmd            # Windows
++./verify.sh           # macOS / Linux
++verify.cmd --keep     # don't wipe rules you've already taught it
++```
++
++It uses `python -m selfevolve.cli` throughout, so it works whether or not Python's
++scripts directory is on your PATH.
++
+ No model yet? `--backend fake` exercises the entire loop — retrieval, the pause,
+ reflection, persistence — deterministically and with no service at all.
+ 
+diff --git a/examples/sample_code/pipeline.py b/examples/sample_code/pipeline.py
+index c1a7d3b..3d4ee3a 100644
+--- a/examples/sample_code/pipeline.py
++++ b/examples/sample_code/pipeline.py
+@@ -1,5 +1,6 @@
+ """Sample input for the reviewer — a small ETL job with a few real problems."""
+-from pyspark.sql import SparkSession, functions as F
++from pyspark.sql import SparkSession
++from pyspark.sql import functions as F
+ 
+ 
+ def load_events(spark, path):
+diff --git a/pyproject.toml b/pyproject.toml
+index 1bf7ee9..dccefa4 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -22,8 +22,8 @@ dependencies = [
+ 
+ [project.optional-dependencies]
+ ui = ["streamlit>=1.36"]
+-dev = ["pytest>=8.0", "ruff>=0.5"]
+-all = ["streamlit>=1.36", "pytest>=8.0", "ruff>=0.5"]
++dev = ["pytest>=8.0", "ruff>=0.15,<0.17"]
++all = ["streamlit>=1.36", "pytest>=8.0", "ruff>=0.15,<0.17"]
+ 
+ [project.scripts]
+ selfevolve = "selfevolve.cli:main"
+@@ -38,3 +38,20 @@ addopts = "-q"
+ [tool.ruff]
+ line-length = 100
+ target-version = "py310"
++
++# Pin the rule set explicitly rather than inheriting ruff's defaults. Those
++# defaults expand between releases — 0.16 added rules 0.15 didn't have — so an
++# unpinned `pip install ruff` in CI is a build that can go red without anyone
++# touching the code. Name what we lint for, and it behaves the same everywhere.
++[tool.ruff.lint]
++select = [
++    "E",   # pycodestyle errors
++    "F",   # pyflakes
++    "W",   # pycodestyle warnings
++    "I",   # import sorting
++    "B",   # bugbear: real bug patterns
++    "UP",  # pyupgrade
++]
++ignore = [
++    "E501",  # line length is enforced by the formatter, not by failing the build
++]
+diff --git a/selfevolve/__init__.py b/selfevolve/__init__.py
+index 103b2eb..170fc68 100644
+--- a/selfevolve/__init__.py
++++ b/selfevolve/__init__.py
+@@ -14,7 +14,7 @@ from .offline import harden_env
+ 
+ harden_env()  # before anything else imports a library that reads these vars
+ 
+-from .config import Config, DEFAULT  # noqa: E402
++from .config import DEFAULT, Config  # noqa: E402
+ from .graph import SelfEvolvingAgent  # noqa: E402
+ from .models import Feedback, Insight, Item, Metrics, Scope, Trajectory  # noqa: E402
+ from .offline import NetworkBlocked, airgap  # noqa: E402
+diff --git a/selfevolve/cli.py b/selfevolve/cli.py
+index 4c636af..3945905 100644
+--- a/selfevolve/cli.py
++++ b/selfevolve/cli.py
+@@ -24,6 +24,7 @@ from .offline import airgap, report
+ from .store import ExperienceStore
+ from .tasks.code_review import CodeReviewTask, input_from_file, input_from_text
+ 
++
+ def _supports_ansi() -> bool:
+     """Decide whether to emit colour, and on Windows, turn it on.
+ 
+@@ -318,10 +319,18 @@ def cmd_export(args, cfg: Config) -> int:
+ 
+ 
+ def cmd_reset(args, cfg: Config) -> int:
+-    if input("Wipe all learned experience? [y/N] ").strip().lower() != "y":
+-        return 1
+-    ExperienceStore(cfg).reset()
+-    print("experience store cleared")
++    if not args.yes:
++        # Interactive prompts are hostile to scripts and to Windows shells where
++        # piping stdin is fiddly. --yes exists so a rerun script can wipe state
++        # without a human at the keyboard.
++        if input("Wipe all learned experience? [y/N] ").strip().lower() != "y":
++            print("cancelled")
++            return 1
++    store = ExperienceStore(cfg)
++    before = len(store.all_insights(include_retired=True))
++    store.reset()
++    store.close()
++    print(f"experience store cleared ({before} rule(s) removed)")
+     return 0
+ 
+ 
+@@ -356,6 +365,7 @@ def main(argv: list[str] | None = None) -> int:
+     e.set_defaults(fn=cmd_export)
+ 
+     s = sub.add_parser("reset")
++    s.add_argument("--yes", "-y", action="store_true", help="skip the confirmation prompt")
+     s.set_defaults(fn=cmd_reset)
+ 
+     args = p.parse_args(argv)
+diff --git a/selfevolve/embeddings.py b/selfevolve/embeddings.py
+index 28d4023..31a3db3 100644
+--- a/selfevolve/embeddings.py
++++ b/selfevolve/embeddings.py
+@@ -31,7 +31,7 @@ import re
+ import urllib.error
+ import urllib.request
+ 
+-from .config import Config, DEFAULT
++from .config import DEFAULT, Config
+ 
+ _TOKEN = re.compile(r"[a-z0-9_]+")
+ _HASH_DIM = 384
+@@ -131,7 +131,8 @@ def _hash_embed(text: str) -> tuple[float, ...]:
+     if not tokens:
+         return tuple(vec)
+     # unigrams + bigrams, so short rules and code snippets still separate
+-    grams = tokens + [f"{a}_{b}" for a, b in zip(tokens, tokens[1:])]
++    # strict=False is deliberate: tokens[1:] is one shorter, that's the point
++    grams = tokens + [f"{a}_{b}" for a, b in zip(tokens, tokens[1:], strict=False)]
+     for g in grams:
+         h = int(hashlib.md5(g.encode()).hexdigest(), 16)
+         vec[h % _HASH_DIM] += 1.0 if (h >> 8) % 2 else -1.0
+diff --git a/selfevolve/graph.py b/selfevolve/graph.py
+index 1fb4c6d..d58ece1 100644
+--- a/selfevolve/graph.py
++++ b/selfevolve/graph.py
+@@ -34,7 +34,7 @@ import json
+ import time
+ from typing import Any
+ 
+-from .config import Config, DEFAULT
++from .config import DEFAULT, Config
+ from .llm import LLMProvider, get_provider
+ from .models import Feedback, Insight, Item, Scope, Trajectory
+ from .store import ExperienceStore
+diff --git a/selfevolve/llm.py b/selfevolve/llm.py
+index fcf5557..29fd98f 100644
+--- a/selfevolve/llm.py
++++ b/selfevolve/llm.py
+@@ -23,7 +23,7 @@ from typing import Any, Protocol, TypeVar
+ 
+ from pydantic import BaseModel
+ 
+-from .config import Config, DEFAULT
++from .config import DEFAULT, Config
+ 
+ T = TypeVar("T", bound=BaseModel)
+ 
+diff --git a/selfevolve/models.py b/selfevolve/models.py
+index 86550fd..02a8f48 100644
+--- a/selfevolve/models.py
++++ b/selfevolve/models.py
+@@ -44,7 +44,7 @@ class Scope(BaseModel):
+         }
+ 
+     @classmethod
+-    def from_metadata(cls, md: dict[str, Any]) -> "Scope":
++    def from_metadata(cls, md: dict[str, Any]) -> Scope:
+         return cls(
+             project=md.get("scope_project", "default"),
+             language=md.get("scope_language", "any"),
+@@ -128,7 +128,7 @@ class Insight(BaseModel):
+         return md
+ 
+     @classmethod
+-    def from_record(cls, rec_id: str, md: dict[str, Any]) -> "Insight":
++    def from_record(cls, rec_id: str, md: dict[str, Any]) -> Insight:
+         return cls(
+             id=rec_id,
+             rule=md.get("rule", ""),
+diff --git a/selfevolve/store.py b/selfevolve/store.py
+index f87b876..72a74f8 100644
+--- a/selfevolve/store.py
++++ b/selfevolve/store.py
+@@ -26,9 +26,9 @@ import math
+ import sqlite3
+ import time
+ from array import array
+-from typing import Iterable
++from collections.abc import Iterable
+ 
+-from .config import Config, DEFAULT
++from .config import DEFAULT, Config
+ from .embeddings import Embedder, get_embedder
+ from .models import Feedback, Insight, Item, Metrics, Scope, Trajectory
+ 
+@@ -103,7 +103,7 @@ def _cosine(a: list[float], b: list[float]) -> float:
+     if not a or not b or len(a) != len(b):
+         return 0.0
+     dot = na = nb = 0.0
+-    for x, y in zip(a, b):
++    for x, y in zip(a, b, strict=True):  # lengths checked above
+         dot += x * y
+         na += x * x
+         nb += y * y
+diff --git a/tests/test_offline.py b/tests/test_offline.py
+index e1ac7c2..bbcb59d 100644
+--- a/tests/test_offline.py
++++ b/tests/test_offline.py
+@@ -147,7 +147,7 @@ def test_embedder_falls_back_when_ollama_dies_midway(cfg):
+ def test_env_is_hardened_on_import():
+     import os
+ 
+-    for key, expected in _ENV_LOCKDOWN.items():
++    for key in _ENV_LOCKDOWN:
+         assert os.environ.get(key) is not None, f"{key} was not set"
+     for key in _STRIP_IF_PRESENT:
+         assert not os.environ.get(key), f"{key} should have been stripped"
+diff --git a/verify.cmd b/verify.cmd
+new file mode 100644
+index 0000000..3d125d6
+--- /dev/null
++++ b/verify.cmd
+@@ -0,0 +1,91 @@
++@echo off
++REM Rerun everything in this folder, from a clean slate.
++REM
++REM   verify.cmd          install, test, prove offline, run a demo loop
++REM   verify.cmd --keep   same, but don't wipe rules learned so far
++REM
++REM Uses `python -m selfevolve.cli` rather than the `selfevolve` command, so it
++REM works whether or not Python's Scripts directory is on your PATH.
++
++setlocal enabledelayedexpansion
++cd /d "%~dp0"
++
++set "KEEP=0"
++if /i "%~1"=="--keep" set "KEEP=1"
++
++REM Keep the demo's learned rules out of your real store.
++if not defined SELFEVOLVE_DATA_DIR set "SELFEVOLVE_DATA_DIR=%~dp0.selfevolve"
++
++echo.
++echo ============================================================
++echo   selfevolve : full rerun
++echo   folder  %CD%
++echo   store   %SELFEVOLVE_DATA_DIR%
++echo ============================================================
++
++echo.
++echo [1/6] Installing (editable)
++python -m pip install -e ".[all]" --quiet || goto :fail
++
++echo.
++echo [2/6] Running the test suite
++python -m pytest tests -q || goto :fail
++
++echo.
++echo [3/6] Linting
++python -m ruff check . || goto :fail
++
++echo.
++echo [4/6] Proving it runs with the network cut
++python -m selfevolve.cli doctor || goto :fail
++
++if "%KEEP%"=="1" (
++  echo.
++  echo [5/6] Keeping existing rules ^(--keep^)
++) else (
++  echo.
++  echo [5/6] Clearing learned rules for a clean demo
++  python -m selfevolve.cli reset --yes || goto :fail
++)
++
++echo.
++echo [6/6] Demo: teach it once, watch it apply the lesson
++echo.
++echo --- review 1: pipeline.py, rejecting the docstring nit ---
++(echo a& echo.& echo r& echo our linter enforces docstrings) | python -m selfevolve.cli --backend fake review examples\sample_code\pipeline.py --project demo
++
++echo.
++echo --- what it learned ---
++python -m selfevolve.cli insights
++
++echo.
++echo --- review 2: handlers.py, a different file ---
++echo (the rejected comment should not reappear)
++(echo s) | python -m selfevolve.cli --backend fake review examples\sample_code\handlers.py --project demo
++
++echo.
++echo --- metrics ---
++python -m selfevolve.cli metrics
++
++echo.
++echo ============================================================
++echo   All green.
++echo.
++echo   Next, with a real model:
++echo     ollama pull qwen3:8b
++echo     ollama pull nomic-embed-text
++echo     python -m selfevolve.cli review path\to\your\file.py --project yourproj
++echo.
++echo   Or the UI:  streamlit run app\streamlit_app.py
++echo ============================================================
++echo.
++endlocal
++exit /b 0
++
++:fail
++echo.
++echo ============================================================
++echo   FAILED at the step above. Nothing below it ran.
++echo ============================================================
++endlocal
++exit /b 1
+diff --git a/verify.sh b/verify.sh
+new file mode 100755
+index 0000000..4628e5f
+--- /dev/null
++++ b/verify.sh
+@@ -0,0 +1,74 @@
++#!/usr/bin/env bash
++# Rerun everything in this folder, from a clean slate.
++#
++#   ./verify.sh          install, test, prove offline, run a demo loop
++#   ./verify.sh --keep   same, but don't wipe rules learned so far
++#
++# Uses `python -m selfevolve.cli` rather than the `selfevolve` command, so it
++# works whether or not Python's scripts directory is on your PATH.
++
++set -euo pipefail
++cd "$(dirname "$0")"
++
++KEEP=0
++[ "${1:-}" = "--keep" ] && KEEP=1
++
++PY="${PYTHON:-python3}"
++command -v "$PY" >/dev/null 2>&1 || PY=python
++
++# Keep the demo's learned rules out of your real store.
++export SELFEVOLVE_DATA_DIR="${SELFEVOLVE_DATA_DIR:-$PWD/.selfevolve}"
++
++hr() { printf '============================================================\n'; }
++
++hr
++echo "  selfevolve : full rerun"
++echo "  folder  $PWD"
++echo "  store   $SELFEVOLVE_DATA_DIR"
++hr
++
++echo; echo "[1/6] Installing (editable)"
++"$PY" -m pip install -e ".[all]" --quiet
++
++echo; echo "[2/6] Running the test suite"
++"$PY" -m pytest tests -q
++
++echo; echo "[3/6] Linting"
++"$PY" -m ruff check .
++
++echo; echo "[4/6] Proving it runs with the network cut"
++"$PY" -m selfevolve.cli doctor
++
++if [ "$KEEP" = "1" ]; then
++  echo; echo "[5/6] Keeping existing rules (--keep)"
++else
++  echo; echo "[5/6] Clearing learned rules for a clean demo"
++  "$PY" -m selfevolve.cli reset --yes
++fi
++
++echo; echo "[6/6] Demo: teach it once, watch it apply the lesson"
++echo; echo "--- review 1: pipeline.py, rejecting the docstring nit ---"
++printf 'a\n\nr\nour linter enforces docstrings\n' \
++  | "$PY" -m selfevolve.cli --backend fake review examples/sample_code/pipeline.py --project demo
++
++echo; echo "--- what it learned ---"
++"$PY" -m selfevolve.cli insights
++
++echo; echo "--- review 2: handlers.py, a different file ---"
++echo "(the rejected comment should not reappear)"
++printf 's\n' \
++  | "$PY" -m selfevolve.cli --backend fake review examples/sample_code/handlers.py --project demo
++
++echo; echo "--- metrics ---"
++"$PY" -m selfevolve.cli metrics
++
++echo; hr
++echo "  All green."
++echo
++echo "  Next, with a real model:"
++echo "    ollama pull qwen3:8b"
++echo "    ollama pull nomic-embed-text"
++echo "    $PY -m selfevolve.cli review path/to/your/file.py --project yourproj"
++echo
++echo "  Or the UI:  streamlit run app/streamlit_app.py"
++hr
+-- 
+2.43.0
+
